@@ -7,10 +7,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     
     - name: Setup .NET
-      uses: actions/setup-dotnet@v1
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '9.x'
     
@@ -28,43 +28,39 @@ jobs:
       run: |
         echo "=== Результаты моделирования СМО ==="
         
-        # Проверка наличия results.txt
         if [ -f "results.txt" ]; then
-          echo "results.txt создан успешно"
+          echo "[OK] results.txt создан успешно"
           echo ""
           echo "Первые 30 строк results.txt:"
           echo "----------------------------------------"
           head -30 results.txt
           echo "----------------------------------------"
         else
-          echo "Ошибка: results.txt не создан"
+          echo "[ERROR] results.txt не создан"
           exit 1
         fi
         
-        # Проверка наличия папки с графиками
         if [ -d "result" ]; then
           PNG_COUNT=$(ls -1 result/*.png 2>/dev/null | wc -l)
-          echo "Создано графиков: $PNG_COUNT из 5"
+          echo "[OK] Создано графиков: $PNG_COUNT из 5"
           
           if [ $PNG_COUNT -eq 5 ]; then
-            echo "Все 5 графиков созданы:"
+            echo "[OK] Все 5 графиков созданы:"
             ls -la result/
           else
-            echo " Создано только $PNG_COUNT графиков (должно быть 5)"
+            echo "[WARNING] Создано только $PNG_COUNT графиков (должно быть 5)"
           fi
         else
-          echo " Папка result не создана"
+          echo "[ERROR] Папка result не создана"
           exit 1
         fi
         
-        # Проверка наличия экспериментальных и теоретических данных
         if grep -q "P0(теор)" results.txt && grep -q "P0(эксп)" results.txt; then
-          echo "Найдены теоретические и экспериментальные данные"
+          echo "[OK] Найдены теоретические и экспериментальные данные"
         else
-          echo "Не найдены все необходимые данные в results.txt"
+          echo "[WARNING] Не найдены все необходимые данные в results.txt"
         fi
         
-        # Вывод последних строк с результатами
         echo ""
         echo "Последние строки с результатами:"
         echo "----------------------------------------"
@@ -84,20 +80,13 @@ jobs:
       run: |
         echo "=== Валидация результатов ==="
         
-        # Извлечение данных из results.txt для проверки
-        # Проверяем, что экспериментальные значения близки к теоретическим
-        
         if [ -f "results.txt" ]; then
-          # Проверяем, что вероятность отказа не отрицательная и не больше 1
           if grep -E "Pотк\(эксп\).*[0-9]\.[0-9]+" results.txt; then
-            echo "Данные вероятности отказа найдены"
+            echo "[OK] Данные вероятности отказа найдены"
           fi
-          
-          # Проверяем, что относительная пропускная способность в диапазоне [0,1]
-          echo "Проверка диапазонов значений..."
         fi
         
-        echo " Валидация завершена"
+        echo "[OK] Валидация завершена"
     
     - name: Test
       run: dotnet test --no-build --verbosity normal

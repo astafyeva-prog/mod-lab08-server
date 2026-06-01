@@ -276,19 +276,19 @@ namespace SmoSimulation
     /// <summary>
     /// Главный класс программы
     /// </summary>
-    class Program
+    public class Program
     {
         private const double MU = 2.0;
         private const int CHANNELS = 5;
         private const double SIMULATION_TIME = 60.0;
         private const int POINTS_COUNT = 10;
 
-        static async Task Main(string[] args)
+        public static async Task Main(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
             Console.WriteLine("Моделирование многоканальной СМО с отказами");
             Console.WriteLine($"Количество каналов: {CHANNELS}");
-            Console.WriteLine($"Интенсивность обслуживания (μ): {MU} заявок/сек");
+            Console.WriteLine($"Интенсивность обслуживания (mu): {MU} заявок/сек");
             Console.WriteLine($"Время симуляции: {SIMULATION_TIME} сек");
             Console.WriteLine(new string('-', 80));
 
@@ -303,8 +303,8 @@ namespace SmoSimulation
 
             List<SimulationResult> results = new List<SimulationResult>();
 
-            Console.WriteLine("\nИсследование зависимости показателей СМО от интенсивности входного потока λ");
-            Console.WriteLine("λ\t\tP0(теор)\tP0(эксп)\tPотк(теор)\tPотк(эксп)\tQ(теор)\t\tQ(эксп)");
+            Console.WriteLine("\nИсследование зависимости показателей СМО от интенсивности входного потока lambda");
+            Console.WriteLine("lambda\t\tP0(теор)\tP0(эксп)\tPотк(теор)\tPотк(эксп)\tQ(теор)\t\tQ(эксп)");
             Console.WriteLine(new string('-', 100));
 
             foreach (double lambda in lambdaValues)
@@ -404,33 +404,33 @@ namespace SmoSimulation
             
             double[] theoreticalP0 = results.Select(r => r.TheoreticalIdleProbability).ToArray();
             double[] experimentalP0 = results.Select(r => r.ExperimentalIdleProbability).ToArray();
-            CreateLineChart("result/p-1.png", "Вероятность простоя системы (P₀)", 
+            CreateLineChart("result/p-1.png", "Вероятность простоя системы (P0)", 
                 lambdaValues, theoreticalP0, experimentalP0, 
-                "Теоретическая P₀", "Экспериментальная P₀", "λ", "P₀");
+                "Теоретическая P0", "Экспериментальная P0", "lambda", "P0");
             
             double[] theoreticalPRej = results.Select(r => r.TheoreticalRejectionProbability).ToArray();
             double[] experimentalPRej = results.Select(r => r.ExperimentalRejectionProbability).ToArray();
             CreateLineChart("result/p-2.png", "Вероятность отказа (Pотк)", 
                 lambdaValues, theoreticalPRej, experimentalPRej,
-                "Теоретическая Pотк", "Экспериментальная Pотк", "λ", "Pотк");
+                "Теоретическая Pотк", "Экспериментальная Pотк", "lambda", "Pотк");
             
             double[] theoreticalQ = results.Select(r => r.TheoreticalRelativeThroughput).ToArray();
             double[] experimentalQ = results.Select(r => r.ExperimentalRelativeThroughput).ToArray();
             CreateLineChart("result/p-3.png", "Относительная пропускная способность (Q)", 
                 lambdaValues, theoreticalQ, experimentalQ,
-                "Теоретическая Q", "Экспериментальная Q", "λ", "Q");
+                "Теоретическая Q", "Экспериментальная Q", "lambda", "Q");
             
             double[] theoreticalA = results.Select(r => r.TheoreticalAbsoluteThroughput).ToArray();
             double[] experimentalA = results.Select(r => r.ExperimentalAbsoluteThroughput).ToArray();
             CreateLineChart("result/p-4.png", "Абсолютная пропускная способность (A)", 
                 lambdaValues, theoreticalA, experimentalA,
-                "Теоретическая A", "Экспериментальная A", "λ", "A (заявок/сек)");
+                "Теоретическая A", "Экспериментальная A", "lambda", "A (заявок/сек)");
             
             double[] theoreticalK = results.Select(r => r.TheoreticalAvgBusyChannels).ToArray();
             double[] experimentalK = results.Select(r => r.ExperimentalAvgBusyChannels).ToArray();
             CreateLineChart("result/p-5.png", "Среднее число занятых каналов (k)", 
                 lambdaValues, theoreticalK, experimentalK,
-                "Теоретическое k", "Экспериментальное k", "λ", "k");
+                "Теоретическое k", "Экспериментальное k", "lambda", "k");
         }
 
         static void CreateLineChart(string filename, string title, double[] x,
@@ -469,14 +469,14 @@ namespace SmoSimulation
                 writer.WriteLine("РЕЗУЛЬТАТЫ МОДЕЛИРОВАНИЯ МНОГОКАНАЛЬНОЙ СМО С ОТКАЗАМИ");
                 writer.WriteLine("=================================================");
                 writer.WriteLine($"Количество каналов: {results[0].Channels}");
-                writer.WriteLine($"Интенсивность обслуживания (μ): {results[0].Mu} заявок/сек");
+                writer.WriteLine($"Интенсивность обслуживания (mu): {results[0].Mu} заявок/сек");
                 writer.WriteLine($"Время симуляции: {SIMULATION_TIME} сек");
                 writer.WriteLine($"Количество экспериментов: {POINTS_COUNT}");
                 writer.WriteLine();
                 
                 writer.WriteLine("ТАБЛИЦА РЕЗУЛЬТАТОВ");
                 writer.WriteLine(new string('-', 150));
-                writer.WriteLine($"{"λ",-10} {"P0(теор)",-15} {"P0(эксп)",-15} {"Pотк(теор)",-15} {"Pотк(эксп)",-15} " +
+                writer.WriteLine($"{"lambda",-10} {"P0(теор)",-15} {"P0(эксп)",-15} {"Pотк(теор)",-15} {"Pотк(эксп)",-15} " +
                                  $"{"Q(теор)",-15} {"Q(эксп)",-15} {"A(теор)",-15} {"A(эксп)",-15} {"k(теор)",-15} {"k(эксп)",-15}");
                 writer.WriteLine(new string('-', 150));
                 
@@ -493,19 +493,19 @@ namespace SmoSimulation
                 writer.WriteLine(new string('-', 150));
                 writer.WriteLine();
                 writer.WriteLine("ВЫВОДЫ:");
-                writer.WriteLine("1. При увеличении интенсивности входного потока λ вероятность отказа возрастает,");
+                writer.WriteLine("1. При увеличении интенсивности входного потока lambda вероятность отказа возрастает,");
                 writer.WriteLine("   а относительная пропускная способность снижается.");
                 writer.WriteLine("2. Экспериментальные значения хорошо согласуются с теоретическими,");
                 writer.WriteLine("   что подтверждает корректность модели.");
-                writer.WriteLine("3. При λ > μ*n система перегружена, большинство запросов получают отказ.");
-                writer.WriteLine("4. Среднее число занятых каналов стремится к n при увеличении λ.");
+                writer.WriteLine("3. При lambda > mu*n система перегружена, большинство запросов получают отказ.");
+                writer.WriteLine("4. Среднее число занятых каналов стремится к n при увеличении lambda.");
                 writer.WriteLine();
                 writer.WriteLine("ФОРМУЛЫ ДЛЯ РАСЧЕТОВ:");
-                writer.WriteLine("P₀ = [∑(ρ^i / i!)]⁻¹, где ρ = λ/μ");
-                writer.WriteLine("Pотк = (ρ^n / n!) * P₀");
+                writer.WriteLine("P0 = [SUM(rho^i / i!)]^(-1), где rho = lambda/mu");
+                writer.WriteLine("Pотк = (rho^n / n!) * P0");
                 writer.WriteLine("Q = 1 - Pотк");
-                writer.WriteLine("A = λ * Q");
-                writer.WriteLine("k = A / μ");
+                writer.WriteLine("A = lambda * Q");
+                writer.WriteLine("k = A / mu");
             }
         }
     }
@@ -532,61 +532,5 @@ namespace SmoSimulation
         public double ExperimentalAbsoluteThroughput { get; set; }
         public double TheoreticalAvgBusyChannels { get; set; }
         public double ExperimentalAvgBusyChannels { get; set; }
-    }
-}                Measurements++;
-            }
-        }
-
-        public double AverageBusyChannels =>
-            Measurements == 0
-                ? 0
-                : (double)BusyChannelsSum / Measurements;
-    }
-
-    class Program
-    {
-        static async Task Main()
-        {
-            int n = 4;
-
-            double mu = 2.0;
-
-            Console.WriteLine("Lambda\tPотк");
-
-            for (double lambda = 0.5; lambda <= 5.0; lambda += 0.5)
-            {
-                var server = new Server(
-                    n,
-                    1000.0 / mu);
-
-                var client = new Client();
-
-                server.Connect(client);
-
-                int simulationTimeMs = 30000;
-
-                DateTime finish =
-                    DateTime.Now.AddMilliseconds(simulationTimeMs);
-
-                while (DateTime.Now < finish)
-                {
-                    client.GenerateRequest();
-
-                    server.Measure();
-
-                    await Task.Delay(
-                        (int)(1000.0 / lambda));
-                }
-
-                await Task.Delay(3000);
-
-                double rejectProbability =
-                    (double)server.RejectedRequests /
-                    server.TotalRequests;
-
-                Console.WriteLine(
-                    $"{lambda:F1}\t{rejectProbability:F4}");
-            }
-        }
     }
 }

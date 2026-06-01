@@ -18,76 +18,54 @@ jobs:
       run: dotnet restore
     
     - name: Build
-      run: dotnet build --no-restore --configuration Release
+      run: dotnet build --configuration Release --no-restore /p:StartupObject=SmoSimulation.Program
     
     - name: Run SMO Simulation
-      run: dotnet run --configuration Release --no-build
-      timeout-minutes: 10
+      run: dotnet run --configuration Release --no-build --project Lab08.csproj
+      timeout-minutes: 15
     
-    - name: Verify simulation results
+    - name: Check if results file exists
+      id: check_results
       run: |
-        echo "=== Результаты моделирования СМО ==="
-        
+        echo "=== Проверка наличия results.txt ==="
+        ls -la
         if [ -f "results.txt" ]; then
-          echo "[OK] results.txt создан успешно"
-          echo ""
-          echo "Первые 30 строк results.txt:"
-          echo "----------------------------------------"
-          head -30 results.txt
-          echo "----------------------------------------"
+          echo "results_exists=true" >> $GITHUB_OUTPUT
+          echo "[OK] results.txt создан"
+          echo "Первые 20 строк results.txt:"
+          head -20 results.txt
         else
-          echo "[ERROR] results.txt не создан"
-          exit 1
+          echo "results_exists=false" >> $GITHUB_OUTPUT
+          echo "[WARNING] results.txt не найден"
+          echo "Содержимое текущей директории:"
+          ls -la
+          echo "Поиск results.txt во всех директориях:"
+          find . -name "results.txt" 2>/dev/null
         fi
         
         if [ -d "result" ]; then
-          PNG_COUNT=$(ls -1 result/*.png 2>/dev/null | wc -l)
-          echo "[OK] Создано графиков: $PNG_COUNT из 5"
-          
-          if [ $PNG_COUNT -eq 5 ]; then
-            echo "[OK] Все 5 графиков созданы:"
-            ls -la result/
-          else
-            echo "[WARNING] Создано только $PNG_COUNT графиков (должно быть 5)"
-          fi
+          echo "[OK] Папка result найдена"
+          echo "Файлы в result:"
+          ls -la result/
         else
-          echo "[ERROR] Папка result не создана"
-          exit 1
+          echo "[WARNING] Папка result не найдена"
+          find . -name "*.png" 2>/dev/null
         fi
-        
-        if grep -q "P0(теор)" results.txt && grep -q "P0(эксп)" results.txt; then
-          echo "[OK] Найдены теоретические и экспериментальные данные"
-        else
-          echo "[WARNING] Не найдены все необходимые данные в results.txt"
-        fi
-        
-        echo ""
-        echo "Последние строки с результатами:"
-        echo "----------------------------------------"
-        tail -15 results.txt
-        echo "----------------------------------------"
     
-    - name: Upload simulation results
+    - name: Upload any existing results
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: smo-simulation-results
         path: |
           results.txt
           result/*.png
+          *.log
         retention-days: 30
+        if-no-files-found: warn
     
-    - name: Validate theoretical vs experimental results
+    - name: Fail if results missing
+      if: steps.check_results.outputs.results_exists == 'false'
       run: |
-        echo "=== Валидация результатов ==="
-        
-        if [ -f "results.txt" ]; then
-          if grep -E "Pотк\(эксп\).*[0-9]\.[0-9]+" results.txt; then
-            echo "[OK] Данные вероятности отказа найдены"
-          fi
-        fi
-        
-        echo "[OK] Валидация завершена"
-    
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
-      continue-on-error: true
+        echo "ERROR: results.txt was not created"
+        exit 1

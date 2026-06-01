@@ -440,14 +440,14 @@ namespace SmoSimulation
             var plot = new Plot();
             
             var scatter1 = plot.Add.Scatter(x, y1);
-            scatter1.Label = legend1;
+            scatter1.LegendText = legend1;
             scatter1.Color = new ScottPlot.Color(0, 0, 255);
             scatter1.LineWidth = 2;
             scatter1.MarkerSize = 8;
             scatter1.MarkerShape = MarkerShape.FilledCircle;
             
             var scatter2 = plot.Add.Scatter(x, y2);
-            scatter2.Label = legend2;
+            scatter2.LegendText = legend2;
             scatter2.Color = new ScottPlot.Color(255, 0, 0);
             scatter2.LineWidth = 2;
             scatter2.MarkerSize = 8;
@@ -456,7 +456,7 @@ namespace SmoSimulation
             plot.Title(title);
             plot.XLabel(xLabel);
             plot.YLabel(yLabel);
-            plot.Legend.Location = Alignment.TopRight;
+            plot.ShowLegend();
             
             plot.SavePng(filename, 800, 600);
             Console.WriteLine($"Создан график: {filename}");

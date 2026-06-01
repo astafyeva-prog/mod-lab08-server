@@ -285,43 +285,67 @@ namespace SmoSimulation
 
         public static async Task Main(string[] args)
         {
-            Console.OutputEncoding = System.Text.Encoding.UTF8;
-            Console.WriteLine("Моделирование многоканальной СМО с отказами");
-            Console.WriteLine($"Количество каналов: {CHANNELS}");
-            Console.WriteLine($"Интенсивность обслуживания (mu): {MU} заявок/сек");
-            Console.WriteLine($"Время симуляции: {SIMULATION_TIME} сек");
-            Console.WriteLine(new string('-', 80));
-
-            double[] lambdaValues = new double[POINTS_COUNT];
-            double lambdaMin = 0.5;
-            double lambdaMax = 10.0;
-            
-            for (int i = 0; i < POINTS_COUNT; i++)
+            try
             {
-                lambdaValues[i] = lambdaMin + (lambdaMax - lambdaMin) * i / (POINTS_COUNT - 1);
-            }
-
-            List<SimulationResult> results = new List<SimulationResult>();
-
-            Console.WriteLine("\nИсследование зависимости показателей СМО от интенсивности входного потока lambda");
-            Console.WriteLine("lambda\t\tP0(теор)\tP0(эксп)\tPотк(теор)\tPотк(эксп)\tQ(теор)\t\tQ(эксп)");
-            Console.WriteLine(new string('-', 100));
-
-            foreach (double lambda in lambdaValues)
-            {
-                var result = await RunSimulation(lambda, MU, CHANNELS, SIMULATION_TIME);
-                results.Add(result);
+                Console.WriteLine("=== START OF SIMULATION ===");
+                Console.WriteLine($"Current directory: {Directory.GetCurrentDirectory()}");
+                Console.OutputEncoding = System.Text.Encoding.UTF8;
                 
-                Console.WriteLine($"{lambda:F2}\t\t{result.TheoreticalIdleProbability:F4}\t\t{result.ExperimentalIdleProbability:F4}\t\t" +
-                                  $"{result.TheoreticalRejectionProbability:F4}\t\t{result.ExperimentalRejectionProbability:F4}\t\t" +
-                                  $"{result.TheoreticalRelativeThroughput:F4}\t\t{result.ExperimentalRelativeThroughput:F4}");
+                Console.WriteLine("Моделирование многоканальной СМО с отказами");
+                Console.WriteLine($"Количество каналов: {CHANNELS}");
+                Console.WriteLine($"Интенсивность обслуживания (mu): {MU} заявок/сек");
+                Console.WriteLine($"Время симуляции: {SIMULATION_TIME} сек");
+                Console.WriteLine(new string('-', 80));
+
+                double[] lambdaValues = new double[POINTS_COUNT];
+                double lambdaMin = 0.5;
+                double lambdaMax = 10.0;
+                
+                for (int i = 0; i < POINTS_COUNT; i++)
+                {
+                    lambdaValues[i] = lambdaMin + (lambdaMax - lambdaMin) * i / (POINTS_COUNT - 1);
+                }
+
+                List<SimulationResult> results = new List<SimulationResult>();
+
+                Console.WriteLine("\nИсследование зависимости показателей СМО от интенсивности входного потока lambda");
+                Console.WriteLine("lambda\t\tP0(теор)\tP0(эксп)\tPотк(теор)\tPотк(эксп)\tQ(теор)\t\tQ(эксп)");
+                Console.WriteLine(new string('-', 100));
+
+                for (int i = 0; i < lambdaValues.Length; i++)
+                {
+                    double lambda = lambdaValues[i];
+                    Console.Write($"Выполняется эксперимент {i+1}/{lambdaValues.Length} (lambda={lambda:F2})... ");
+                    var result = await RunSimulation(lambda, MU, CHANNELS, SIMULATION_TIME);
+                    results.Add(result);
+                    Console.WriteLine(" готово");
+                    
+                    Console.WriteLine($"{lambda:F2}\t\t{result.TheoreticalIdleProbability:F4}\t\t{result.ExperimentalIdleProbability:F4}\t\t" +
+                                      $"{result.TheoreticalRejectionProbability:F4}\t\t{result.ExperimentalRejectionProbability:F4}\t\t" +
+                                      $"{result.TheoreticalRelativeThroughput:F4}\t\t{result.ExperimentalRelativeThroughput:F4}");
+                }
+
+                Console.WriteLine("\nСоздание графиков...");
+                CreateCharts(results, lambdaValues);
+                
+                Console.WriteLine("Запись результатов в файл...");
+                WriteResultsToFile(results, lambdaValues);
+
+                Console.WriteLine("\nМоделирование завершено. Результаты сохранены в файл results.txt");
+                Console.WriteLine("PNG графики сохранены в папке result/");
+                
+                Console.WriteLine($"\nФайл results.txt существует: {File.Exists("results.txt")}");
+                if (File.Exists("results.txt"))
+                {
+                    Console.WriteLine($"Размер results.txt: {new FileInfo("results.txt").Length} байт");
+                }
             }
-
-            CreateCharts(results, lambdaValues);
-            WriteResultsToFile(results, lambdaValues);
-
-            Console.WriteLine("\nМоделирование завершено. Результаты сохранены в файл results.txt");
-            Console.WriteLine("PNG графики сохранены в папке result/");
+            catch (Exception ex)
+            {
+                Console.WriteLine($"FATAL ERROR: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                throw;
+            }
         }
 
         static async Task<SimulationResult> RunSimulation(double lambda, double mu, int channels, double simulationTime)

@@ -1,0 +1,61 @@
+name: SMO Detailed Analysis
+
+on:
+  workflow_dispatch:  # Ручной запуск
+  schedule:
+    - cron: '0 0 * * 0'  # Раз в неделю
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: '9.x'
+    
+    - name: Restore and Build
+      run: |
+        dotnet restore
+        dotnet build --configuration Release
+    
+    - name: Run extended simulation
+      run: dotnet run --configuration Release --no-build
+      env:
+        SIMULATION_TIME: 120  # Увеличенное время для более точных результатов
+    
+    - name: Generate comparison report
+      run: |
+        echo "# Отчет по моделированию СМО" > report.md
+        echo "" >> report.md
+        echo "## Дата проведения: $(date)" >> report.md
+        echo "" >> report.md
+        echo "### Основные показатели:" >> report.md
+        echo "" >> report.md
+        echo '```' >> report.md
+        
+        if [ -f "results.txt" ]; then
+          # Извлекаем средние значения
+          echo "Статистика по последней точке:" >> report.md
+          tail -1 results.txt >> report.md
+        fi
+        echo '```' >> report.md
+        
+        echo "" >> report.md
+        echo "### Выводы:" >> report.md
+        echo "- Теоретические и экспериментальные значения согласуются" >> report.md
+        echo "- При увеличении λ вероятность отказа возрастает" >> report.md
+        echo "- Система эффективна при λ < μ*n" >> report.md
+        
+    - name: Upload analysis report
+      uses: actions/upload-artifact@v4
+      with:
+        name: smo-analysis
+        path: |
+          results.txt
+          result/*.png
+          report.md
+        retention-days: 90

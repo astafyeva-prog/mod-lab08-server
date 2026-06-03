@@ -1,61 +1,48 @@
-name: SMO Detailed Analysis
+name: .NET SMO Simulation
 
-on:
-  workflow_dispatch:  # Ручной запуск
-  schedule:
-    - cron: '0 0 * * 0'  # Раз в неделю
+on: [push, pull_request]
 
 jobs:
-  analyze:
+  build:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     
     - name: Setup .NET
-      uses: actions/setup-dotnet@v1
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '9.x'
     
-    - name: Restore and Build
-      run: |
-        dotnet restore
-        dotnet build --configuration Release
+    - name: Restore dependencies
+      run: dotnet restore Lab08.csproj
     
-    - name: Run extended simulation
-      run: dotnet run --configuration Release --no-build
-      env:
-        SIMULATION_TIME: 120  # Увеличенное время для более точных результатов
+    - name: Build
+      run: dotnet build Lab08.csproj --configuration Release --no-restore
     
-    - name: Generate comparison report
+    - name: Run SMO Simulation
+      run: dotnet run --project Lab08.csproj --configuration Release --no-build
+      timeout-minutes: 10
+    
+    - name: Verify simulation results
       run: |
-        echo "# Отчет по моделированию СМО" > report.md
-        echo "" >> report.md
-        echo "## Дата проведения: $(date)" >> report.md
-        echo "" >> report.md
-        echo "### Основные показатели:" >> report.md
-        echo "" >> report.md
-        echo '```' >> report.md
+        echo "=== Результаты моделирования СМО ==="
         
         if [ -f "results.txt" ]; then
-          # Извлекаем средние значения
-          echo "Статистика по последней точке:" >> report.md
-          tail -1 results.txt >> report.md
+          echo "OK: results.txt создан успешно"
+          echo ""
+          echo "Первые 30 строк results.txt:"
+          echo "----------------------------------------"
+          head -30 results.txt
+          echo "----------------------------------------"
+        else
+          echo "ERROR: results.txt не создан"
+          exit 1
         fi
-        echo '```' >> report.md
-        
-        echo "" >> report.md
-        echo "### Выводы:" >> report.md
-        echo "- Теоретические и экспериментальные значения согласуются" >> report.md
-        echo "- При увеличении λ вероятность отказа возрастает" >> report.md
-        echo "- Система эффективна при λ < μ*n" >> report.md
-        
-    - name: Upload analysis report
+    
+    - name: Upload simulation results
       uses: actions/upload-artifact@v4
       with:
-        name: smo-analysis
-        path: |
-          results.txt
-          result/*.png
-          report.md
-        retention-days: 90
+        name: smo-simulation-results
+        path: results.txt
+        retention-days: 30

@@ -1,71 +1,23 @@
-name: .NET SMO Simulation
+name: .NET
+
 
 on: [push, pull_request]
 
+
 jobs:
-  build:
+ build:
+
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    
+    - uses: actions/checkout@v2
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@v1
       with:
         dotnet-version: '9.x'
-    
     - name: Restore dependencies
       run: dotnet restore
-    
     - name: Build
-      run: dotnet build --configuration Release --no-restore /p:StartupObject=SmoSimulation.Program
-    
-    - name: Run SMO Simulation
-      run: dotnet run --configuration Release --no-build --project Lab08.csproj
-      timeout-minutes: 15
-    
-    - name: Check if results file exists
-      id: check_results
-      run: |
-        echo "=== Проверка наличия results.txt ==="
-        ls -la
-        if [ -f "results.txt" ]; then
-          echo "results_exists=true" >> $GITHUB_OUTPUT
-          echo "[OK] results.txt создан"
-          echo "Первые 20 строк results.txt:"
-          head -20 results.txt
-        else
-          echo "results_exists=false" >> $GITHUB_OUTPUT
-          echo "[WARNING] results.txt не найден"
-          echo "Содержимое текущей директории:"
-          ls -la
-          echo "Поиск results.txt во всех директориях:"
-          find . -name "results.txt" 2>/dev/null
-        fi
-        
-        if [ -d "result" ]; then
-          echo "[OK] Папка result найдена"
-          echo "Файлы в result:"
-          ls -la result/
-        else
-          echo "[WARNING] Папка result не найдена"
-          find . -name "*.png" 2>/dev/null
-        fi
-    
-    - name: Upload any existing results
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: smo-simulation-results
-        path: |
-          results.txt
-          result/*.png
-          *.log
-        retention-days: 30
-        if-no-files-found: warn
-    
-    - name: Fail if results missing
-      if: steps.check_results.outputs.results_exists == 'false'
-      run: |
-        echo "ERROR: results.txt was not created"
-        exit 1
+      run: dotnet build --no-restore
+    - name: Test
+      run: dotnet test --no-build --verbosity normal

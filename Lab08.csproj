@@ -8,8 +8,4 @@
     <StartupObject>SmoSimulation.Program</StartupObject>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="ScottPlot" Version="5.0.36" />
-  </ItemGroup>
-
 </Project>

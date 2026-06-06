@@ -183,7 +183,7 @@ namespace SmoModeling
         {
             lock (_statsLock)
             {
-                _totalBusyTime = _channels.Sum(c => c.IsBusy ? 1 : 0);
+                _totalBusyTime += _channels.Count(c => c.IsBusy);
             }
         }
         
@@ -230,7 +230,7 @@ namespace SmoModeling
         public double Uptime { get; set; }
         
         // Расчетные показатели
-        public double ProbabilityIdle => 1 - (AvgBusyChannels / 0); // Будет вычисляться отдельно
+        public double ProbabilityIdle => 1 - (AvgBusyChannels / 5); // 5 - количество каналов
         public double ProbabilityRejection => TotalRequests > 0 ? (double)RejectedRequests / TotalRequests : 0;
         public double RelativeThroughput => TotalRequests > 0 ? (double)ProcessedRequests / TotalRequests : 0;
         public double AbsoluteThroughput => ProcessedRequests / Uptime;
@@ -311,9 +311,9 @@ namespace SmoModeling
             
             // Диапазон интенсивности входного потока
             var lambdaValues = new List<double>();
-            for (double lambda = 0.5; lambda <= 5.5; lambda += 0.5)
+            for (double lambda = 0.5; lambda <= 5.5 + 0.1; lambda += 0.5)
             {
-                lambdaValues.Add(lambda);
+                lambdaValues.Add(Math.Round(lambda, 1));
             }
             
             var experimentalResults = new List<ExperimentalPoint>();
@@ -362,7 +362,7 @@ namespace SmoModeling
                 experimentalResults.Add(new ExperimentalPoint
                 {
                     Lambda = lambda,
-                    ProbabilityIdle = 1 - (stats.AvgBusyChannels / ChannelCount),
+                    ProbabilityIdle = stats.ProbabilityIdle,
                     ProbabilityRejection = stats.ProbabilityRejection,
                     RelativeThroughput = stats.RelativeThroughput,
                     AbsoluteThroughput = stats.AbsoluteThroughput,
@@ -389,13 +389,13 @@ namespace SmoModeling
             // Сохраняем результаты в файл
             SaveResultsToFile(experimentalResults, theoreticalResults, lambdaValues);
             
-            // Генерируем графики (создаем CSV файлы для построения графиков)
-            GenerateGraphData(experimentalResults, theoreticalResults, lambdaValues);
+            // Генерируем HTML файл с графиками
+            GenerateHtmlWithCharts(experimentalResults, theoreticalResults, lambdaValues);
             
             Console.WriteLine("\n\nМоделирование завершено!");
-            Console.WriteLine("Результаты сохранены в файл results.txt");
-            Console.WriteLine("Данные для графиков сохранены в папке result/");
-            Console.WriteLine("Для построения графиков используйте Excel или любой другой инструмент");
+            Console.WriteLine("Результаты сохранены в файл result/results.txt");
+            Console.WriteLine("Графики сохранены в файл result/charts.html");
+            Console.WriteLine("Откройте файл result/charts.html в любом браузере для просмотра графиков");
         }
         
         static void SaveResultsToFile(List<ExperimentalPoint> experimental, List<TheoreticalPoint> theoretical, List<double> lambdaValues)
@@ -426,67 +426,280 @@ namespace SmoModeling
             }
         }
         
-        static void GenerateGraphData(List<ExperimentalPoint> experimental, List<TheoreticalPoint> theoretical, List<double> lambdaValues)
+        static void GenerateHtmlWithCharts(List<ExperimentalPoint> experimental, List<TheoreticalPoint> theoretical, List<double> lambdaValues)
         {
-            Directory.CreateDirectory("result");
+            // Подготовка данных для JavaScript
+            var lambdaArray = lambdaValues.Select(x => x.ToString("F2")).ToArray();
+            var expIdle = experimental.Select(x => x.ProbabilityIdle.ToString("F4")).ToArray();
+            var theoIdle = theoretical.Select(x => x.ProbabilityIdle.ToString("F4")).ToArray();
+            var expRejection = experimental.Select(x => x.ProbabilityRejection.ToString("F4")).ToArray();
+            var theoRejection = theoretical.Select(x => x.ProbabilityRejection.ToString("F4")).ToArray();
+            var expRelative = experimental.Select(x => x.RelativeThroughput.ToString("F4")).ToArray();
+            var theoRelative = theoretical.Select(x => x.RelativeThroughput.ToString("F4")).ToArray();
+            var expAbsolute = experimental.Select(x => x.AbsoluteThroughput.ToString("F2")).ToArray();
+            var theoAbsolute = theoretical.Select(x => x.AbsoluteThroughput.ToString("F2")).ToArray();
+            var expChannels = experimental.Select(x => x.AvgBusyChannels.ToString("F4")).ToArray();
+            var theoChannels = theoretical.Select(x => x.AvgBusyChannels.ToString("F4")).ToArray();
             
-            // График 1: Вероятность простоя системы
-            using (var writer = new StreamWriter("result/graph1_idle.csv"))
-            {
-                writer.WriteLine("Lambda,Experimental,Theoretical");
-                for (int i = 0; i < lambdaValues.Count; i++)
-                {
-                    writer.WriteLine($"{lambdaValues[i]},{experimental[i].ProbabilityIdle},{theoretical[i].ProbabilityIdle}");
-                }
-            }
+            string html = $@"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=""UTF-8"">
+    <title>Результаты моделирования СМО</title>
+    <script src=""https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js""></script>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+        }}
+        h1 {{
+            text-align: center;
+            color: #333;
+        }}
+        .chart-container {{
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }}
+        canvas {{
+            max-height: 400px;
+        }}
+        .info {{
+            text-align: center;
+            color: #666;
+            margin-top: 20px;
+        }}
+    </style>
+</head>
+<body>
+    <div class=""container"">
+        <h1>Моделирование многоканальной СМО с отказами</h1>
+        <div class=""info"">
+            <p>Количество каналов: 5 | Интенсивность обслуживания μ = 2.0 запросов/сек</p>
+        </div>
+        
+        <div class=""chart-container"">
+            <h3>График 1: Вероятность простоя системы P₀</h3>
+            <canvas id=""chart1""></canvas>
+        </div>
+        
+        <div class=""chart-container"">
+            <h3>График 2: Вероятность отказа P<sub>отк</sub></h3>
+            <canvas id=""chart2""></canvas>
+        </div>
+        
+        <div class=""chart-container"">
+            <h3>График 3: Относительная пропускная способность Q</h3>
+            <canvas id=""chart3""></canvas>
+        </div>
+        
+        <div class=""chart-container"">
+            <h3>График 4: Абсолютная пропускная способность A</h3>
+            <canvas id=""chart4""></canvas>
+        </div>
+        
+        <div class=""chart-container"">
+            <h3>График 5: Среднее число занятых каналов k</h3>
+            <canvas id=""chart5""></canvas>
+        </div>
+    </div>
+    
+    <script>
+        const lambda = [{string.Join(", ", lambdaArray.Select(x => $"\"{x}\""))}];
+        
+        // График 1: Вероятность простоя
+        new Chart(document.getElementById('chart1'), {{
+            type: 'line',
+            data: {{
+                labels: lambda,
+                datasets: [
+                    {{
+                        label: 'Экспериментальные значения',
+                        data: [{string.Join(", ", expIdle)}],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }},
+                    {{
+                        label: 'Теоретические значения',
+                        data: [{string.Join(", ", theoIdle)}],
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }}
+                ]
+            }},
+            options: {{
+                responsive: true,
+                plugins: {{
+                    legend: {{ position: 'top' }},
+                    title: {{ display: false }}
+                }},
+                scales: {{
+                    x: {{ title: {{ display: true, text: 'Интенсивность входного потока λ (запросов/сек)' }} }},
+                    y: {{ title: {{ display: true, text: 'Вероятность простоя P₀' }}, min: 0, max: 1 }}
+                }}
+            }}
+        }});
+        
+        // График 2: Вероятность отказа
+        new Chart(document.getElementById('chart2'), {{
+            type: 'line',
+            data: {{
+                labels: lambda,
+                datasets: [
+                    {{
+                        label: 'Экспериментальные значения',
+                        data: [{string.Join(", ", expRejection)}],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }},
+                    {{
+                        label: 'Теоретические значения',
+                        data: [{string.Join(", ", theoRejection)}],
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }}
+                ]
+            }},
+            options: {{
+                responsive: true,
+                plugins: {{
+                    legend: {{ position: 'top' }}
+                }},
+                scales: {{
+                    x: {{ title: {{ display: true, text: 'Интенсивность входного потока λ (запросов/сек)' }} }},
+                    y: {{ title: {{ display: true, text: 'Вероятность отказа P<sub>отк</sub>' }}, min: 0, max: 1 }}
+                }}
+            }}
+        }});
+        
+        // График 3: Относительная пропускная способность
+        new Chart(document.getElementById('chart3'), {{
+            type: 'line',
+            data: {{
+                labels: lambda,
+                datasets: [
+                    {{
+                        label: 'Экспериментальные значения',
+                        data: [{string.Join(", ", expRelative)}],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }},
+                    {{
+                        label: 'Теоретические значения',
+                        data: [{string.Join(", ", theoRelative)}],
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }}
+                ]
+            }},
+            options: {{
+                responsive: true,
+                plugins: {{
+                    legend: {{ position: 'top' }}
+                }},
+                scales: {{
+                    x: {{ title: {{ display: true, text: 'Интенсивность входного потока λ (запросов/сек)' }} }},
+                    y: {{ title: {{ display: true, text: 'Относительная пропускная способность Q' }}, min: 0, max: 1 }}
+                }}
+            }}
+        }});
+        
+        // График 4: Абсолютная пропускная способность
+        new Chart(document.getElementById('chart4'), {{
+            type: 'line',
+            data: {{
+                labels: lambda,
+                datasets: [
+                    {{
+                        label: 'Экспериментальные значения',
+                        data: [{string.Join(", ", expAbsolute)}],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }},
+                    {{
+                        label: 'Теоретические значения',
+                        data: [{string.Join(", ", theoAbsolute)}],
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }}
+                ]
+            }},
+            options: {{
+                responsive: true,
+                plugins: {{
+                    legend: {{ position: 'top' }}
+                }},
+                scales: {{
+                    x: {{ title: {{ display: true, text: 'Интенсивность входного потока λ (запросов/сек)' }} }},
+                    y: {{ title: {{ display: true, text: 'Абсолютная пропускная способность A (запросов/сек)' }} }}
+                }}
+            }}
+        }});
+        
+        // График 5: Среднее число занятых каналов
+        new Chart(document.getElementById('chart5'), {{
+            type: 'line',
+            data: {{
+                labels: lambda,
+                datasets: [
+                    {{
+                        label: 'Экспериментальные значения',
+                        data: [{string.Join(", ", expChannels)}],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }},
+                    {{
+                        label: 'Теоретические значения',
+                        data: [{string.Join(", ", theoChannels)}],
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        tension: 0.3,
+                        fill: false
+                    }}
+                ]
+            }},
+            options: {{
+                responsive: true,
+                plugins: {{
+                    legend: {{ position: 'top' }}
+                }},
+                scales: {{
+                    x: {{ title: {{ display: true, text: 'Интенсивность входного потока λ (запросов/сек)' }} }},
+                    y: {{ title: {{ display: true, text: 'Среднее число занятых каналов k' }}, min: 0, max: 5 }}
+                }}
+            }}
+        }});
+    </script>
+</body>
+</html>";
             
-            // График 2: Вероятность отказа
-            using (var writer = new StreamWriter("result/graph2_rejection.csv"))
-            {
-                writer.WriteLine("Lambda,Experimental,Theoretical");
-                for (int i = 0; i < lambdaValues.Count; i++)
-                {
-                    writer.WriteLine($"{lambdaValues[i]},{experimental[i].ProbabilityRejection},{theoretical[i].ProbabilityRejection}");
-                }
-            }
-            
-            // График 3: Относительная пропускная способность
-            using (var writer = new StreamWriter("result/graph3_relative.csv"))
-            {
-                writer.WriteLine("Lambda,Experimental,Theoretical");
-                for (int i = 0; i < lambdaValues.Count; i++)
-                {
-                    writer.WriteLine($"{lambdaValues[i]},{experimental[i].RelativeThroughput},{theoretical[i].RelativeThroughput}");
-                }
-            }
-            
-            // График 4: Абсолютная пропускная способность
-            using (var writer = new StreamWriter("result/graph4_absolute.csv"))
-            {
-                writer.WriteLine("Lambda,Experimental,Theoretical");
-                for (int i = 0; i < lambdaValues.Count; i++)
-                {
-                    writer.WriteLine($"{lambdaValues[i]},{experimental[i].AbsoluteThroughput},{theoretical[i].AbsoluteThroughput}");
-                }
-            }
-            
-            // График 5: Среднее число занятых каналов
-            using (var writer = new StreamWriter("result/graph5_channels.csv"))
-            {
-                writer.WriteLine("Lambda,Experimental,Theoretical");
-                for (int i = 0; i < lambdaValues.Count; i++)
-                {
-                    writer.WriteLine($"{lambdaValues[i]},{experimental[i].AvgBusyChannels},{theoretical[i].AvgBusyChannels}");
-                }
-            }
-            
-            Console.WriteLine("\nСозданы CSV файлы для построения графиков в папке result/");
-            Console.WriteLine("Импортируйте эти файлы в Excel для построения графиков:");
-            Console.WriteLine("- graph1_idle.csv - Вероятность простоя");
-            Console.WriteLine("- graph2_rejection.csv - Вероятность отказа");
-            Console.WriteLine("- graph3_relative.csv - Относительная пропускная способность");
-            Console.WriteLine("- graph4_absolute.csv - Абсолютная пропускная способность");
-            Console.WriteLine("- graph5_channels.csv - Среднее число занятых каналов");
+            File.WriteAllText("result/charts.html", html, System.Text.Encoding.UTF8);
+            Console.WriteLine("HTML файл с графиками создан успешно!");
         }
     }
     

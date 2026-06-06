@@ -1,16 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using ScottPlot;
 
 namespace SmoModeling
 {
-    /// <summary>
-    /// Класс клиента, генерирующего запросы к серверу
-    /// </summary>
     public class Client
     {
         private static int _nextId = 1;
@@ -18,276 +17,181 @@ namespace SmoModeling
         private readonly Server _server;
         private readonly Random _random;
         private readonly double _requestRate;
-
+        
         public event EventHandler<RequestEventArgs> RequestGenerated;
-
+        
         public Client(Server server, double requestRate)
         {
-            Id = Interlocked.Increment(ref _nextId);
+            Id = _nextId++;
             _server = server;
             _requestRate = requestRate;
-            _random = new Random(Guid.NewGuid().GetHashCode());
+            _random = new Random();
         }
-
-        public static void ResetIdCounter() => _nextId = 1;
-
+        
         public async Task StartGeneratingRequests(CancellationToken cancellationToken)
         {
             while (!cancellationToken.IsCancellationRequested)
             {
                 double interval = -Math.Log(1.0 - _random.NextDouble()) / _requestRate;
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(interval), cancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-
+                await Task.Delay(TimeSpan.FromSeconds(interval), cancellationToken);
+                
                 var request = new Request(Id, DateTime.Now);
                 OnRequestGenerated(request);
             }
         }
-
+        
         protected virtual void OnRequestGenerated(Request request)
         {
             RequestGenerated?.Invoke(this, new RequestEventArgs(request));
         }
     }
-
-    /// <summary>
-    /// Класс запроса от клиента
-    /// </summary>
+    
     public class Request
     {
         public int ClientId { get; }
         public DateTime GenerationTime { get; }
         public DateTime? StartTime { get; set; }
         public DateTime? EndTime { get; set; }
-
+        
         public Request(int clientId, DateTime generationTime)
         {
             ClientId = clientId;
             GenerationTime = generationTime;
         }
     }
-
-    /// <summary>
-    /// Аргументы события запроса
-    /// </summary>
+    
     public class RequestEventArgs : EventArgs
     {
         public Request Request { get; }
-        public RequestEventArgs(Request request) { Request = request; }
+        public RequestEventArgs(Request request) => Request = request;
     }
-
-    /// <summary>
-    /// Класс канала обслуживания
-    /// </summary>
+    
     public class ServiceChannel
     {
         public int Id { get; }
         public bool IsBusy { get; private set; }
         private readonly double _serviceRate;
-        private readonly Random _random;
-
-        // Суммарное время, которое канал был занят (в секундах)
-        private double _totalBusySeconds = 0;
-        public double TotalBusySeconds => _totalBusySeconds;
-
+        
         public ServiceChannel(int id, double serviceRate)
         {
             Id = id;
             _serviceRate = serviceRate;
             IsBusy = false;
-            _random = new Random(Guid.NewGuid().GetHashCode());
         }
-
+        
         public async Task ProcessRequest(Request request)
         {
             IsBusy = true;
             request.StartTime = DateTime.Now;
-
-            double serviceTime = -Math.Log(1.0 - _random.NextDouble()) / _serviceRate;
+            
+            var random = new Random();
+            double serviceTime = -Math.Log(1.0 - random.NextDouble()) / _serviceRate;
             await Task.Delay(TimeSpan.FromSeconds(serviceTime));
-
+            
             request.EndTime = DateTime.Now;
-            double elapsed = (request.EndTime.Value - request.StartTime.Value).TotalSeconds;
-
-            // Атомарно накапливаем занятое время канала
-            double current;
-            do
-            {
-                current = _totalBusySeconds;
-            } while (Math.Abs(Interlocked.CompareExchange(ref _totalBusySeconds, current + elapsed, current) - current) > 1e-10);
-
             IsBusy = false;
         }
-
-        public void ResetStats()
-        {
-            _totalBusySeconds = 0;
-        }
     }
-
-    /// <summary>
-    /// Класс сервера с пулом каналов
-    /// </summary>
+    
     public class Server
     {
         private readonly List<ServiceChannel> _channels;
-        private readonly int _channelCount;
-        private readonly object _lock = new object();
-
+        private readonly object _statsLock = new object();
+        
         private int _totalRequests = 0;
         private int _processedRequests = 0;
         private int _rejectedRequests = 0;
-        // Количество запросов, поступивших в момент, когда ВСЕ каналы были свободны
-        private int _idleArrivals = 0;
-
-        private DateTime _startTime;
-
+        private double _totalBusyTime = 0;
+        private readonly Stopwatch _systemUptime = new Stopwatch();
+        
         public Server(int channelCount, double serviceRate)
         {
-            _channelCount = channelCount;
             _channels = new List<ServiceChannel>();
             for (int i = 0; i < channelCount; i++)
+            {
                 _channels.Add(new ServiceChannel(i + 1, serviceRate));
-            _startTime = DateTime.Now;
+            }
+            _systemUptime.Start();
         }
-
+        
         public void SubscribeClient(Client client)
         {
             client.RequestGenerated += OnRequestReceived;
         }
-
+        
         private async void OnRequestReceived(object sender, RequestEventArgs e)
         {
-            ServiceChannel freeChannel = null;
-            bool allIdle = false;
-
-            lock (_lock)
-            {
-                _totalRequests++;
-
-                // Считаем момент поступления: сколько каналов занято прямо сейчас
-                int busyNow = _channels.Count(c => c.IsBusy);
-                if (busyNow == 0)
-                    allIdle = true;
-
-                freeChannel = _channels.FirstOrDefault(c => !c.IsBusy);
-
-                if (freeChannel != null)
-                    _processedRequests++;
-                else
-                    _rejectedRequests++;
-            }
-
-            // Фиксируем idle-прибытие ПОСЛЕ проверки (вне lock для корректного snapshot)
-            if (allIdle && freeChannel != null)
-            {
-                lock (_lock) { _idleArrivals++; }
-            }
-
+            lock (_statsLock) _totalRequests++;
+            
+            var freeChannel = _channels.FirstOrDefault(c => !c.IsBusy);
+            
             if (freeChannel != null)
             {
+                lock (_statsLock) _processedRequests++;
                 await freeChannel.ProcessRequest(e.Request);
             }
             else
             {
+                lock (_statsLock) _rejectedRequests++;
                 e.Request.StartTime = DateTime.Now;
                 e.Request.EndTime = DateTime.Now;
             }
+            
+            lock (_statsLock)
+            {
+                _totalBusyTime += _channels.Count(c => c.IsBusy);
+            }
         }
-
+        
         public Statistics GetStatistics()
         {
-            lock (_lock)
+            lock (_statsLock)
             {
-                double uptime = (DateTime.Now - _startTime).TotalSeconds;
-
-                // Среднее число занятых каналов = сумма времён занятости каналов / время работы системы
-                double totalBusyChannelTime = _channels.Sum(c => c.TotalBusySeconds);
-                double avgBusyChannels = uptime > 0 ? totalBusyChannelTime / uptime : 0;
-
-                // P0 (эксп.) = доля запросов, поступивших в систему, когда все каналы были свободны
-                double p0Exp = _totalRequests > 0 ? (double)_idleArrivals / _totalRequests : 1.0;
-
+                double uptime = _systemUptime.Elapsed.TotalSeconds;
+                double avgBusyChannels = uptime > 0 ? _totalBusyTime / uptime : 0;
+                
                 return new Statistics
                 {
                     TotalRequests = _totalRequests,
                     ProcessedRequests = _processedRequests,
                     RejectedRequests = _rejectedRequests,
-                    ChannelCount = _channelCount,
                     AvgBusyChannels = avgBusyChannels,
-                    ProbabilityIdle = p0Exp,
                     Uptime = uptime
                 };
             }
         }
-
-        public void Reset()
-        {
-            lock (_lock)
-            {
-                _totalRequests = 0;
-                _processedRequests = 0;
-                _rejectedRequests = 0;
-                _idleArrivals = 0;
-                _startTime = DateTime.Now;
-                foreach (var ch in _channels)
-                    ch.ResetStats();
-            }
-        }
     }
-
-    /// <summary>
-    /// Класс статистики (только хранение, никаких формул внутри)
-    /// </summary>
+    
     public class Statistics
     {
         public int TotalRequests { get; set; }
         public int ProcessedRequests { get; set; }
         public int RejectedRequests { get; set; }
-        public int ChannelCount { get; set; }
         public double AvgBusyChannels { get; set; }
-        public double ProbabilityIdle { get; set; }
         public double Uptime { get; set; }
-
-        // Расчётные показатели на основе накопленной статистики
-        public double ProbabilityRejection =>
-            TotalRequests > 0 ? (double)RejectedRequests / TotalRequests : 0;
-
-        public double RelativeThroughput =>
-            TotalRequests > 0 ? (double)ProcessedRequests / TotalRequests : 1;
-
-        public double AbsoluteThroughput =>
-            Uptime > 0 ? ProcessedRequests / Uptime : 0;
+        
+        public double ProbabilityRejection => TotalRequests > 0 ? (double)RejectedRequests / TotalRequests : 0;
+        public double RelativeThroughput => TotalRequests > 0 ? (double)ProcessedRequests / TotalRequests : 0;
+        public double AbsoluteThroughput => ProcessedRequests / Uptime;
+        public double ProbabilityIdle => 1 - (AvgBusyChannels / 5);
     }
-
-    /// <summary>
-    /// Теоретические расчёты СМО (формулы Эрланга)
-    /// </summary>
+    
     public static class SmoTheory
     {
         public static TheoreticalResults Calculate(double lambda, double mu, int n)
         {
             double rho = lambda / mu;
-
-            // P0 = 1 / sum_{k=0}^{n} rho^k / k!
             double sum = 0;
+            
             for (int k = 0; k <= n; k++)
                 sum += Math.Pow(rho, k) / Factorial(k);
-            double p0 = 1.0 / sum;
-
-            // Pотк = (rho^n / n!) * P0  — формула Эрланга
+            
+            double p0 = 1 / sum;
             double pRejection = (Math.Pow(rho, n) / Factorial(n)) * p0;
-
             double relativeThroughput = 1 - pRejection;
             double absoluteThroughput = lambda * relativeThroughput;
-            double avgBusyChannels = rho * relativeThroughput;
-
+            double avgBusyChannels = rho * (1 - pRejection);
+            
             return new TheoreticalResults
             {
                 ProbabilityIdle = p0,
@@ -297,7 +201,7 @@ namespace SmoModeling
                 AvgBusyChannels = avgBusyChannels
             };
         }
-
+        
         private static double Factorial(int n)
         {
             double result = 1;
@@ -305,7 +209,7 @@ namespace SmoModeling
             return result;
         }
     }
-
+    
     public class TheoreticalResults
     {
         public double ProbabilityIdle { get; set; }
@@ -314,216 +218,254 @@ namespace SmoModeling
         public double AbsoluteThroughput { get; set; }
         public double AvgBusyChannels { get; set; }
     }
-
-    public class DataPoint
-    {
-        public double Lambda { get; set; }
-        public double ProbabilityIdle { get; set; }
-        public double ProbabilityRejection { get; set; }
-        public double RelativeThroughput { get; set; }
-        public double AbsoluteThroughput { get; set; }
-        public double AvgBusyChannels { get; set; }
-    }
-
+    
     class Program
     {
         private const int ChannelCount = 5;
         private const double Mu = 2.0;
-        private const int SimulationSeconds = 60;
-
+        
         static async Task Main(string[] args)
         {
             Console.WriteLine("МОДЕЛИРОВАНИЕ МНОГОКАНАЛЬНОЙ СМО С ОТКАЗАМИ");
-            Console.WriteLine($"Количество каналов: {ChannelCount}");
-            Console.WriteLine($"Интенсивность обслуживания (μ): {Mu} запросов/сек");
-            Console.WriteLine();
-
-            var lambdaValues = Enumerable.Range(1, 11)
-                .Select(i => Math.Round(i * 0.5, 1))
-                .ToList(); // 0.5, 1.0, 1.5, ..., 5.5
-
-            var expResults = new List<DataPoint>();
-            var theoResults = new List<DataPoint>();
-
+            Console.WriteLine($"Каналов: {ChannelCount}, μ = {Mu} запросов/сек\n");
+            
+            var lambdaValues = new List<double>();
+            for (double lambda = 0.5; lambda <= 5.5 + 0.1; lambda += 0.5)
+                lambdaValues.Add(Math.Round(lambda, 1));
+            
+            var experimentalResults = new List<Statistics>();
+            var theoreticalResults = new List<TheoreticalResults>();
+            
             foreach (var lambda in lambdaValues)
             {
-                Console.WriteLine($"\n--- λ = {lambda:F1} ---");
-
-                Client.ResetIdCounter();
+                Console.WriteLine($"\n--- λ = {lambda:F2} ---");
+                
                 var server = new Server(ChannelCount, Mu);
                 var clients = new List<Client>();
                 var cts = new CancellationTokenSource();
-
-                // Один клиент с полной интенсивностью lambda (простейший поток)
+                
                 int clientCount = 5;
                 double clientRate = lambda / clientCount;
+                
                 for (int i = 0; i < clientCount; i++)
                 {
                     var client = new Client(server, clientRate);
                     server.SubscribeClient(client);
                     clients.Add(client);
                 }
-
-                var tasks = clients
-                    .Select(c => c.StartGeneratingRequests(cts.Token))
-                    .ToArray();
-
-                Console.WriteLine($"Моделирование {SimulationSeconds} сек...");
-                await Task.Delay(SimulationSeconds * 1000);
+                
+                var tasks = clients.Select(c => c.StartGeneratingRequests(cts.Token)).ToArray();
+                
+                Console.WriteLine("Моделирование 60 сек...");
+                await Task.Delay(60000);
                 cts.Cancel();
-
+                
                 try { await Task.WhenAll(tasks); }
                 catch (OperationCanceledException) { }
-
-                // Небольшая пауза, чтобы дождаться завершения async void обработчиков
-                await Task.Delay(500);
-
+                
                 var stats = server.GetStatistics();
-                var theo = SmoTheory.Calculate(lambda, Mu, ChannelCount);
-
-                expResults.Add(new DataPoint
-                {
-                    Lambda = lambda,
-                    ProbabilityIdle = stats.ProbabilityIdle,
-                    ProbabilityRejection = stats.ProbabilityRejection,
-                    RelativeThroughput = stats.RelativeThroughput,
-                    AbsoluteThroughput = stats.AbsoluteThroughput,
-                    AvgBusyChannels = stats.AvgBusyChannels
-                });
-
-                theoResults.Add(new DataPoint
-                {
-                    Lambda = lambda,
-                    ProbabilityIdle = theo.ProbabilityIdle,
-                    ProbabilityRejection = theo.ProbabilityRejection,
-                    RelativeThroughput = theo.RelativeThroughput,
-                    AbsoluteThroughput = theo.AbsoluteThroughput,
-                    AvgBusyChannels = theo.AvgBusyChannels
-                });
-
-                Console.WriteLine($"  Поступило: {stats.TotalRequests}  Обслужено: {stats.ProcessedRequests}  Отказов: {stats.RejectedRequests}");
-                Console.WriteLine($"  P0  эксп={stats.ProbabilityIdle:F4}  теор={theo.ProbabilityIdle:F4}");
-                Console.WriteLine($"  Pотк эксп={stats.ProbabilityRejection:F4}  теор={theo.ProbabilityRejection:F4}");
-                Console.WriteLine($"  k    эксп={stats.AvgBusyChannels:F4}  теор={theo.AvgBusyChannels:F4}");
+                var theoretical = SmoTheory.Calculate(lambda, Mu, ChannelCount);
+                
+                experimentalResults.Add(stats);
+                theoreticalResults.Add(theoretical);
+                
+                Console.WriteLine($"Поступило: {stats.TotalRequests}, Обслужено: {stats.ProcessedRequests}, Отказ: {stats.RejectedRequests}");
+                Console.WriteLine($"Pотк эксп: {stats.ProbabilityRejection:F4}, теор: {theoretical.ProbabilityRejection:F4}");
             }
-
+            
             Directory.CreateDirectory("result");
-            SaveResultsToFile(expResults, theoResults, lambdaValues);
-            SaveCharts(expResults, theoResults, lambdaValues);
-
-            Console.WriteLine("\n\nМоделирование завершено!");
-            Console.WriteLine("Результаты: result/results.txt");
-            Console.WriteLine("Графики:    result/p-1.png ... result/p-5.png");
+            SaveResultsToFile(experimentalResults, theoreticalResults, lambdaValues);
+            GenerateTextGraphs(experimentalResults, theoreticalResults, lambdaValues);
+            GenerateSimpleCsvFiles(experimentalResults, theoreticalResults, lambdaValues);
+            GenerateHtmlReport(experimentalResults, theoreticalResults, lambdaValues);
+            
+            Console.WriteLine("\n\nРЕЗУЛЬТАТЫ СОХРАНЕНЫ В ПАПКУ 'result':");
+            Console.WriteLine("  - results.txt - таблица результатов");
+            Console.WriteLine("  - report.html - отчет с графиками (открыть в браузере)");
+            Console.WriteLine("  - data_*.csv - данные для построения графиков");
+            Console.WriteLine("\nОТКРОЙТЕ ФАЙЛ result/report.html В ЛЮБОМ БРАУЗЕРЕ");
         }
-
-        static void SaveResultsToFile(List<DataPoint> exp, List<DataPoint> theo, List<double> lambdas)
+        
+        static void SaveResultsToFile(List<Statistics> experimental, List<TheoreticalResults> theoretical, List<double> lambdaValues)
         {
-            using var w = new StreamWriter("result/results.txt", false, System.Text.Encoding.UTF8);
-            w.WriteLine("РЕЗУЛЬТАТЫ МОДЕЛИРОВАНИЯ МНОГОКАНАЛЬНОЙ СМО С ОТКАЗАМИ");
-            w.WriteLine("=====================================================");
-            w.WriteLine($"Количество каналов n = {ChannelCount}");
-            w.WriteLine($"Интенсивность обслуживания μ = {Mu} запросов/сек");
-            w.WriteLine($"Время моделирования = {SimulationSeconds} сек на точку");
-            w.WriteLine();
-            w.WriteLine($"{"λ",-6} | {"P0 эксп",-10} | {"P0 теор",-10} | {"Pотк эксп",-12} | {"Pотк теор",-12} | {"Q эксп",-9} | {"Q теор",-9} | {"A эксп",-9} | {"A теор",-9} | {"k эксп",-9} | {"k теор",-9}");
-            w.WriteLine(new string('-', 130));
-
-            for (int i = 0; i < lambdas.Count; i++)
+            using (var writer = new StreamWriter("result/results.txt", false, System.Text.Encoding.UTF8))
             {
-                w.WriteLine(
-                    $"{lambdas[i],-6:F1} | " +
-                    $"{exp[i].ProbabilityIdle,-10:F4} | {theo[i].ProbabilityIdle,-10:F4} | " +
-                    $"{exp[i].ProbabilityRejection,-12:F4} | {theo[i].ProbabilityRejection,-12:F4} | " +
-                    $"{exp[i].RelativeThroughput,-9:F4} | {theo[i].RelativeThroughput,-9:F4} | " +
-                    $"{exp[i].AbsoluteThroughput,-9:F2} | {theo[i].AbsoluteThroughput,-9:F2} | " +
-                    $"{exp[i].AvgBusyChannels,-9:F4} | {theo[i].AvgBusyChannels,-9:F4}");
+                writer.WriteLine("РЕЗУЛЬТАТЫ МОДЕЛИРОВАНИЯ МНОГОКАНАЛЬНОЙ СМО С ОТКАЗАМИ");
+                writer.WriteLine("=====================================================");
+                writer.WriteLine($"Каналов: 5 | μ = 2.0 запросов/сек\n");
+                writer.WriteLine("λ\tP0(эксп)\tP0(теор)\tPотк(эксп)\tPотк(теор)\tQ(эксп)\tQ(теор)\tA(эксп)\tA(теор)\tk(эксп)\tk(теор)");
+                
+                for (int i = 0; i < lambdaValues.Count; i++)
+                {
+                    writer.WriteLine($"{lambdaValues[i]:F2}\t{experimental[i].ProbabilityIdle:F4}\t{theoretical[i].ProbabilityIdle:F4}\t{experimental[i].ProbabilityRejection:F4}\t{theoretical[i].ProbabilityRejection:F4}\t{experimental[i].RelativeThroughput:F4}\t{theoretical[i].RelativeThroughput:F4}\t{experimental[i].AbsoluteThroughput:F2}\t{theoretical[i].AbsoluteThroughput:F2}\t{experimental[i].AvgBusyChannels:F4}\t{theoretical[i].AvgBusyChannels:F4}");
+                }
             }
-
-            w.WriteLine();
-            w.WriteLine("ВЫВОДЫ:");
-            w.WriteLine("1. С ростом λ вероятность отказа (Pотк) растёт, вероятность простоя (P0) убывает.");
-            w.WriteLine("2. Относительная пропускная способность Q убывает с ростом λ (больше отказов).");
-            w.WriteLine("3. Абсолютная пропускная способность A сначала растёт, затем насыщается при λ >> μ·n.");
-            w.WriteLine("4. Экспериментальные значения хорошо согласуются с теоретическими формулами Эрланга.");
         }
-
-        static void SaveCharts(List<DataPoint> exp, List<DataPoint> theo, List<double> lambdas)
+        
+        static void GenerateTextGraphs(List<Statistics> experimental, List<TheoreticalResults> theoretical, List<double> lambdaValues)
         {
-            double[] xs = lambdas.Select(x => x).ToArray();
-
-            // График 1: Вероятность простоя P0
-            SaveChart("result/p-1.png",
-                "Вероятность простоя системы P₀",
-                "λ (запросов/сек)", "P₀",
-                xs,
-                exp.Select(p => p.ProbabilityIdle).ToArray(),
-                theo.Select(p => p.ProbabilityIdle).ToArray(),
-                yMin: 0, yMax: 1);
-
-            // График 2: Вероятность отказа
-            SaveChart("result/p-2.png",
-                "Вероятность отказа P_отк",
-                "λ (запросов/сек)", "P_отк",
-                xs,
-                exp.Select(p => p.ProbabilityRejection).ToArray(),
-                theo.Select(p => p.ProbabilityRejection).ToArray(),
-                yMin: 0, yMax: 1);
-
-            // График 3: Относительная пропускная способность Q
-            SaveChart("result/p-3.png",
-                "Относительная пропускная способность Q",
-                "λ (запросов/сек)", "Q",
-                xs,
-                exp.Select(p => p.RelativeThroughput).ToArray(),
-                theo.Select(p => p.RelativeThroughput).ToArray(),
-                yMin: 0, yMax: 1);
-
-            // График 4: Абсолютная пропускная способность A
-            SaveChart("result/p-4.png",
-                "Абсолютная пропускная способность A",
-                "λ (запросов/сек)", "A (запросов/сек)",
-                xs,
-                exp.Select(p => p.AbsoluteThroughput).ToArray(),
-                theo.Select(p => p.AbsoluteThroughput).ToArray());
-
-            // График 5: Среднее число занятых каналов k
-            SaveChart("result/p-5.png",
-                "Среднее число занятых каналов k",
-                "λ (запросов/сек)", "k",
-                xs,
-                exp.Select(p => p.AvgBusyChannels).ToArray(),
-                theo.Select(p => p.AvgBusyChannels).ToArray(),
-                yMin: 0, yMax: ChannelCount);
-
-            Console.WriteLine("Графики p-1.png ... p-5.png сохранены в папку result/");
+            using (var writer = new StreamWriter("result/text_graphs.txt", false, System.Text.Encoding.UTF8))
+            {
+                writer.WriteLine("ГРАФИК 1: Вероятность отказа Pотк\n");
+                writer.WriteLine(" λ     | Теоретическое | Экспериментальное | Визуализация");
+                writer.WriteLine("-------+---------------+-------------------+----------------");
+                
+                for (int i = 0; i < lambdaValues.Count; i++)
+                {
+                    int theoBars = (int)(theoretical[i].ProbabilityRejection * 50);
+                    int expBars = (int)(experimental[i].ProbabilityRejection * 50);
+                    writer.WriteLine($"{lambdaValues[i]:F2}    | {theoretical[i].ProbabilityRejection:F4}     | {experimental[i].ProbabilityRejection:F4}        | Теор: {new string('█', theoBars)}");
+                    writer.WriteLine($"       |               |                   | Эксп: {new string('█', expBars)}");
+                }
+                
+                writer.WriteLine("\n\nГРАФИК 2: Среднее число занятых каналов k\n");
+                writer.WriteLine(" λ     | Теоретическое | Экспериментальное | Визуализация");
+                writer.WriteLine("-------+---------------+-------------------+----------------");
+                
+                for (int i = 0; i < lambdaValues.Count; i++)
+                {
+                    int theoBars = (int)(theoretical[i].AvgBusyChannels / 5 * 50);
+                    int expBars = (int)(experimental[i].AvgBusyChannels / 5 * 50);
+                    writer.WriteLine($"{lambdaValues[i]:F2}    | {theoretical[i].AvgBusyChannels:F4}     | {experimental[i].AvgBusyChannels:F4}        | Теор: {new string('█', theoBars)}");
+                    writer.WriteLine($"       |               |                   | Эксп: {new string('█', expBars)}");
+                }
+            }
         }
-
-        static void SaveChart(string path, string title, string xLabel, string yLabel,
-            double[] xs, double[] expY, double[] theoY,
-            double? yMin = null, double? yMax = null)
+        
+        static void GenerateSimpleCsvFiles(List<Statistics> experimental, List<TheoreticalResults> theoretical, List<double> lambdaValues)
         {
-            var plt = new Plot(800, 500);
-
-            var expScatter = plt.AddScatter(xs, expY, label: "Экспериментальные");
-            expScatter.LineWidth = 2;
-            expScatter.MarkerSize = 7;
-            expScatter.Color = System.Drawing.Color.FromArgb(0, 150, 200);
-
-            var theoScatter = plt.AddScatter(xs, theoY, label: "Теоретические");
-            theoScatter.LineWidth = 2;
-            theoScatter.MarkerSize = 7;
-            theoScatter.Color = System.Drawing.Color.FromArgb(220, 80, 60);
-            theoScatter.LineStyle = ScottPlot.LineStyle.Dash;
-
-            plt.Title(title);
-            plt.XLabel(xLabel);
-            plt.YLabel(yLabel);
-            plt.Legend(location: ScottPlot.Alignment.UpperRight);
-
-            if (yMin.HasValue && yMax.HasValue)
-                plt.SetAxisLimitsY(yMin.Value, yMax.Value);
-
-            plt.SaveFig(path);
+            // CSV для каждого графика
+            WriteCsv("result/p1_idle.csv", lambdaValues, 
+                experimental.Select(x => x.ProbabilityIdle).ToList(),
+                theoretical.Select(x => x.ProbabilityIdle).ToList(),
+                "P0_эксп", "P0_теор");
+            
+            WriteCsv("result/p2_rejection.csv", lambdaValues,
+                experimental.Select(x => x.ProbabilityRejection).ToList(),
+                theoretical.Select(x => x.ProbabilityRejection).ToList(),
+                "Pотк_эксп", "Pотк_теор");
+            
+            WriteCsv("result/p3_throughput.csv", lambdaValues,
+                experimental.Select(x => x.RelativeThroughput).ToList(),
+                theoretical.Select(x => x.RelativeThroughput).ToList(),
+                "Q_эксп", "Q_теор");
+            
+            WriteCsv("result/p4_absolute.csv", lambdaValues,
+                experimental.Select(x => x.AbsoluteThroughput).ToList(),
+                theoretical.Select(x => x.AbsoluteThroughput).ToList(),
+                "A_эксп", "A_теор");
+            
+            WriteCsv("result/p5_channels.csv", lambdaValues,
+                experimental.Select(x => x.AvgBusyChannels).ToList(),
+                theoretical.Select(x => x.AvgBusyChannels).ToList(),
+                "k_эксп", "k_теор");
+        }
+        
+        static void WriteCsv(string filename, List<double> lambda, List<double> exp, List<double> theo, string expName, string theoName)
+        {
+            using (var writer = new StreamWriter(filename, false, System.Text.Encoding.UTF8))
+            {
+                writer.WriteLine($"Lambda,{expName},{theoName}");
+                for (int i = 0; i < lambda.Count; i++)
+                    writer.WriteLine($"{lambda[i]:F2},{exp[i]:F4},{theo[i]:F4}");
+            }
+        }
+        
+        static void GenerateHtmlReport(List<Statistics> experimental, List<TheoreticalResults> theoretical, List<double> lambdaValues)
+        {
+            string html = $@"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <title>СМО Отчет</title>
+    <style>
+        body {{ font-family: Arial; margin: 20px; background: #f0f0f0; }}
+        .container {{ max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 10px; }}
+        h1, h2 {{ text-align: center; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+        th {{ background: #4CAF50; color: white; }}
+        .chart {{ margin: 30px 0; padding: 20px; background: #f9f9f9; border-radius: 5px; }}
+        .bar {{ background: #4CAF50; height: 30px; margin: 5px 0; color: white; padding: 5px; }}
+        .legend {{ display: inline-block; width: 20px; height: 20px; margin: 0 10px; }}
+        .green {{ background: #4CAF50; }}
+        .red {{ background: #f44336; }}
+    </style>
+</head>
+<body>
+<div class='container'>
+    <h1>Многоканальная СМО с отказами</h1>
+    <h3>Параметры: n = 5 каналов, μ = 2.0 запросов/сек</h3>
+    
+    <h2>Таблица результатов</h2>
+    <table>
+        <tr>
+            <th>λ</th><th>P₀ эксп</th><th>P₀ теор</th>
+            <th>P<sub>отк</sub> эксп</th><th>P<sub>отк</sub> теор</th>
+            <th>Q эксп</th><th>Q теор</th>
+            <th>A эксп</th><th>A теор</th>
+            <th>k эксп</th><th>k теор</th>
+        </tr>";
+            
+            for (int i = 0; i < lambdaValues.Count; i++)
+            {
+                html += $@"
+        <tr>
+            <td>{lambdaValues[i]:F2}</td>
+            <td>{experimental[i].ProbabilityIdle:F4}</td><td>{theoretical[i].ProbabilityIdle:F4}</td>
+            <td>{experimental[i].ProbabilityRejection:F4}</td><td>{theoretical[i].ProbabilityRejection:F4}</td>
+            <td>{experimental[i].RelativeThroughput:F4}</td><td>{theoretical[i].RelativeThroughput:F4}</td>
+            <td>{experimental[i].AbsoluteThroughput:F2}</td><td>{theoretical[i].AbsoluteThroughput:F2}</td>
+            <td>{experimental[i].AvgBusyChannels:F4}</td><td>{theoretical[i].AvgBusyChannels:F4}</td>
+        </tr>";
+            }
+            
+        html += @"</table>
+    
+    <h2>График 1: Вероятность отказа Pотк</h2>
+    <div class='chart'>";
+            
+        for (int i = 0; i < lambdaValues.Count; i++)
+        {
+            int expWidth = (int)(experimental[i].ProbabilityRejection * 300);
+            int theoWidth = (int)(theoretical[i].ProbabilityRejection * 300);
+            html += $@"
+        <div><b>λ={lambdaValues[i]:F2}</b></div>
+        <div style='background:#f44336; width:{theoWidth}px; margin:2px 0; padding:2px; color:white;'>Теор: {experimental[i].ProbabilityRejection:F3}</div>
+        <div style='background:#4CAF50; width:{expWidth}px; margin:2px 0; padding:2px; color:white;'>Эксп: {theoretical[i].ProbabilityRejection:F3}</div>";
+        }
+        
+        html += @"</div>
+    
+    <h2>График 2: Среднее число занятых каналов k</h2>
+    <div class='chart'>";
+        
+        for (int i = 0; i < lambdaValues.Count; i++)
+        {
+            int expWidth = (int)(experimental[i].AvgBusyChannels / 5 * 300);
+            int theoWidth = (int)(theoretical[i].AvgBusyChannels / 5 * 300);
+            html += $@"
+        <div><b>λ={lambdaValues[i]:F2}</b></div>
+        <div style='background:#f44336; width:{theoWidth}px; margin:2px 0; padding:2px; color:white;'>Теор: {experimental[i].AvgBusyChannels:F2}</div>
+        <div style='background:#4CAF50; width:{expWidth}px; margin:2px 0; padding:2px; color:white;'>Эксп: {theoretical[i].AvgBusyChannels:F2}</div>";
+        }
+        
+        html += @"</div>
+    
+    <h2>CSV файлы для построения графиков</h2>
+    <ul>
+        <li><a href='p1_idle.csv'>p1_idle.csv</a> - Вероятность простоя</li>
+        <li><a href='p2_rejection.csv'>p2_rejection.csv</a> - Вероятность отказа</li>
+        <li><a href='p3_throughput.csv'>p3_throughput.csv</a> - Относительная пропускная способность</li>
+        <li><a href='p4_absolute.csv'>p4_absolute.csv</a> - Абсолютная пропускная способность</li>
+        <li><a href='p5_channels.csv'>p5_channels.csv</a> - Среднее число занятых каналов</li>
+    </ul>
+    <p><i>Откройте CSV файлы в Excel и постройте графики: Вставка → Точечная диаграмма</i></p>
+</div>
+</body>
+</html>";
+            
+            File.WriteAllText("result/report.html", html, System.Text.Encoding.UTF8);
         }
     }
 }

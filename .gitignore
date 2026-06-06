@@ -1,0 +1,19 @@
+# Build results
+bin/
+obj/
+*.user
+*.suo
+*.cache
+
+# Result files (but keep the folder structure)
+result/*.png
+!result/.gitkeep
+
+# IDE files
+.vscode/
+.idea/
+*.sln.ide
+
+# OS files
+.DS_Store
+Thumbs.db

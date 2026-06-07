@@ -8,9 +8,6 @@ using ScottPlot;
 
 namespace SmoModeling
 {
-    // -----------------------------------------------------------------------
-    // Класс запроса от клиента
-    // -----------------------------------------------------------------------
     public class Request
     {
         public int ClientId { get; }
@@ -25,18 +22,12 @@ namespace SmoModeling
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Аргументы события запроса
-    // -----------------------------------------------------------------------
     public class RequestEventArgs : EventArgs
     {
         public Request Request { get; }
         public RequestEventArgs(Request request) => Request = request;
     }
 
-    // -----------------------------------------------------------------------
-    // Канал обслуживания
-    // -----------------------------------------------------------------------
     public class ServiceChannel
     {
         // IsBusy меняется только внутри Server под локом — поэтому internal set
@@ -56,10 +47,6 @@ namespace SmoModeling
             _rng = new Random(Guid.NewGuid().GetHashCode());
         }
 
-        /// <summary>
-        /// Обрабатывает запрос: имитирует время обработки по экспоненциальному закону.
-        /// Вызывается уже после того, как IsBusy = true выставлен под локом.
-        /// </summary>
         public async Task ProcessRequest(Request request)
         {
             request.StartTime = DateTime.Now;
@@ -70,10 +57,7 @@ namespace SmoModeling
             request.EndTime = DateTime.Now;
         }
     }
-
-    // -----------------------------------------------------------------------
-    // Сервер с пулом каналов
-    // -----------------------------------------------------------------------
+    
     public class Server
     {
         private readonly List<ServiceChannel> _channels;
@@ -105,15 +89,12 @@ namespace SmoModeling
             client.RequestGenerated += OnRequestReceived;
         }
 
-        // async void — вынужденно для EventHandler; исключения перехватываем внутри
         private async void OnRequestReceived(object sender, RequestEventArgs e)
         {
             try
             {
                 ServiceChannel freeChannel = null;
 
-                // Атомарно: найти свободный канал И сразу пометить его занятым,
-                // а также обновить интеграл занятости ДО изменения состояния
                 lock (_lock)
                 {
                     // Снимок занятости перед изменением состояния
@@ -151,10 +132,6 @@ namespace SmoModeling
             }
         }
 
-        /// <summary>
-        /// Вызывается строго под _lock.
-        /// Добавляет площадь прямоугольника (текущее число занятых) × (прошедшее время).
-        /// </summary>
         private void TakeSnapshot()
         {
             var now    = DateTime.Now;
@@ -172,11 +149,6 @@ namespace SmoModeling
 
                 double uptime = (DateTime.Now - _startTime).TotalSeconds;
 
-                // P0 — доля времени когда ВСЕ каналы свободны, нельзя получить из
-                // _busyChannelSeconds напрямую. Считаем через формулу Эрланга из
-                // экспериментального rho: k_avg = busyChannelSeconds / uptime,
-                // а P0 пересчитываем через теорию (или выводим как есть).
-                // Для честного P0 нам нужен отдельный счётчик — см. ниже.
 
                 double avgBusy = uptime > 0 ? _busyChannelSeconds / uptime : 0;
 
@@ -205,9 +177,6 @@ namespace SmoModeling
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Статистика эксперимента
-    // -----------------------------------------------------------------------
     public class Statistics
     {
         public int    TotalRequests     { get; set; }
@@ -229,20 +198,10 @@ namespace SmoModeling
         public double AbsoluteThroughput =>
             Uptime > 0 ? ProcessedRequests / Uptime : 0;
 
-        // P0 — вероятность простоя: через формулу Эрланга от экспериментальной нагрузки.
-        // rho_exp = k̄ / (1 - P_отк)  →  но проще взять напрямую из формул Эрланга:
-        // здесь используем экспериментальный k̄ и восстанавливаем P0 как 1 - k̄/n,
-        // что даёт хорошее приближение для M/M/n/n (формула Паулса).
-        // Корректно: P0 = 1 - A/mu_total, где mu_total = n*mu — максимальная пропускная.
-        // Самый точный вариант — через теорию с экспериментальной λ.
-        // Оставляем: P0 ≈ 1 - k̄/n
         public double ProbabilityIdle =>
             ChannelCount > 0 ? Math.Max(0, 1.0 - AvgBusyChannels / ChannelCount) : 0;
     }
 
-    // -----------------------------------------------------------------------
-    // Клиент — генерирует запросы с экспоненциальным законом
-    // -----------------------------------------------------------------------
     public class Client
     {
         private static int _nextId = 1;
@@ -280,9 +239,6 @@ namespace SmoModeling
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Теоретические расчёты — формула Эрланга (M/M/n/n)
-    // -----------------------------------------------------------------------
     public static class SmoTheory
     {
         public static TheoreticalResults Calculate(double lambda, double mu, int n)
@@ -329,9 +285,6 @@ namespace SmoModeling
         public double AvgBusyChannels      { get; set; }
     }
 
-    // -----------------------------------------------------------------------
-    // Вспомогательные классы точек данных
-    // -----------------------------------------------------------------------
     public class DataPoint
     {
         public double Lambda              { get; set; }
@@ -351,14 +304,11 @@ namespace SmoModeling
         public double TheoAvgBusy         { get; set; }
     }
 
-    // -----------------------------------------------------------------------
-    // Главный класс
-    // -----------------------------------------------------------------------
     class Program
     {
         private const int    ChannelCount      = 5;    // n — число каналов
         private const double Mu                = 2.0;  // μ — интенсивность обслуживания
-        private const int    SimulationSeconds = 30;   // время одного эксперимента
+        private const int    SimulationSeconds = 10;   // время одного эксперимента
         private const int    ClientCount       = 5;    // число клиентов
 
         static async Task Main(string[] args)
@@ -390,8 +340,6 @@ namespace SmoModeling
                     clients.Add(c);
                 }
 
-                // Сбрасываем статический счётчик ID между экспериментами — не нужно,
-                // но запускаем все клиенты параллельно
                 var tasks = clients
                     .Select(c => c.StartGeneratingRequests(cts.Token))
                     .ToArray();
@@ -440,9 +388,6 @@ namespace SmoModeling
             Console.WriteLine("  result/p-1.png  ... result/p-5.png");
         }
 
-        // -------------------------------------------------------------------
-        // Текстовый отчёт
-        // -------------------------------------------------------------------
         static void SaveResultsTxt(List<DataPoint> pts)
         {
             using var w = new StreamWriter("result/results.txt", false, System.Text.Encoding.UTF8);
@@ -475,9 +420,6 @@ namespace SmoModeling
             w.WriteLine("5. Экспериментальные данные хорошо согласуются с теоретическими.");
         }
 
-        // -------------------------------------------------------------------
-        // PNG-графики через ScottPlot
-        // -------------------------------------------------------------------
         static void SaveCharts(List<DataPoint> pts)
         {
             double[] xs = pts.Select(p => p.Lambda).ToArray();

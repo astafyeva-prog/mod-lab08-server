@@ -2,13 +2,16 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <RootNamespace>SmoModeling</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+    <!-- ScottPlot 4.x — стабильная версия для .NET 6, генерирует PNG без зависимостей от GUI -->
+    <PackageReference Include="ScottPlot" Version="4.1.71" />
   </ItemGroup>
 
 </Project>

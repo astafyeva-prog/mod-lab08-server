@@ -4,11 +4,9 @@ on:
     branches: [ main, master, b52 ]
   pull_request:
     branches: [ main, master, b52 ]
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v2
     
@@ -16,7 +14,10 @@ jobs:
       uses: actions/setup-dotnet@v1
       with:
         dotnet-version: '9.x'
-    
+
+    - name: Install libgdiplus
+      run: sudo apt-get install -y libgdiplus
+
     - name: Restore dependencies
       run: dotnet restore
     

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
@@ -10,7 +10,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- ScottPlot 4.x — стабильная версия для .NET 6, генерирует PNG без зависимостей от GUI -->
     <PackageReference Include="ScottPlot" Version="4.1.71" />
   </ItemGroup>
 

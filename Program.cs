@@ -308,7 +308,7 @@ namespace SmoModeling
     {
         private const int    ChannelCount      = 5;    // n — число каналов
         private const double Mu                = 2.0;  // μ — интенсивность обслуживания
-        private const int    SimulationSeconds = 10;   // время одного эксперимента
+        private const int    SimulationSeconds = 30;   // время одного эксперимента
         private const int    ClientCount       = 5;    // число клиентов
 
         static async Task Main(string[] args)
